@@ -9,6 +9,8 @@ import soundfile as sf
 from tqdm import tqdm
 import shutil
 import re
+from torch.cuda.amp import autocast
+import gc
 
 SAMPLING_RATE = 16000
 
@@ -72,7 +74,10 @@ def transcribe_and_translate(audio_file, source_language):
     if rate != SAMPLING_RATE:
         audio = librosa.resample(audio, orig_sr=rate, target_sr=SAMPLING_RATE)
     
-    temp_dir = tempfile.mkdtemp(dir="E:\\hebrew wispher")
+    temp_base_dir = os.path.join(os.getcwd(), "temp")
+    os.makedirs(temp_base_dir, exist_ok=True)
+    print("created dir:", temp_base_dir)
+    temp_dir = tempfile.mkdtemp(dir=temp_base_dir)
     
     chunk_duration = 30  # Duration in seconds
     chunks = []
@@ -96,14 +101,17 @@ def transcribe_and_translate(audio_file, source_language):
         chunk_audio, _ = librosa.load(chunk_path, sr=SAMPLING_RATE)
         
         input_features = processor(chunk_audio, sampling_rate=SAMPLING_RATE, return_tensors="pt").input_features.to(device)
-        
-        predicted_ids = model.generate(input_features, language=source_language, num_beams=5)
+        with autocast():
+            predicted_ids = model.generate(input_features, language=source_language, num_beams=3)
         chunk_text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
         
+        torch.cuda.empty_cache() # Clear unused memory from PyTorch
+        gc.collect() # Python garbage collection
+
         transcribed_text += chunk_text + " "
         print(f"Processed chunk {i+1}/{len(chunks)}")
     
-    output_dir = "E:\\hebrew wispher\\output"
+    output_dir = os.path.join(os.getcwd(), "output")
     os.makedirs(output_dir, exist_ok=True)
     
     # Split the transcribed text into paragraphs
